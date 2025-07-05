@@ -38,3 +38,10 @@ RUN pip install -r /opt/pystemon/requirements.txt
 
 COPY docker_start.sh /docker_start.sh
 ENTRYPOINT ["/bin/bash", "docker_start.sh"]
+
+# Create AIL user and switch to it
+RUN useradd -m -s /bin/bash ail && \
+    chown -R ail:ail /opt/AIL && \
+    chown -R ail:ail /opt/pystemon
+
+USER ail
