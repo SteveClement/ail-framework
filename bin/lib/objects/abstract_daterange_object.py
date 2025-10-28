@@ -18,6 +18,7 @@ sys.path.append(os.environ['AIL_BIN'])
 # Import Project packages
 ##################################
 from lib.objects.abstract_object import AbstractObject
+from lib.ail_core import sscan_iterator
 from lib.ConfigLoader import ConfigLoader
 from lib.item_basic import is_crawled, get_item_domain
 from lib.data_retention_engine import update_obj_date
@@ -81,7 +82,7 @@ class AbstractDaterangeObject(AbstractObject, ABC):
         else:
             return int(nb)
 
-    def _get_meta(self, options=[]):
+    def _get_meta(self, options=[], flask_context=False):
         meta_dict = self.get_default_meta(options=options)
         meta_dict['first_seen'] = self.get_first_seen()
         meta_dict['last_seen'] = self.get_last_seen()
@@ -90,6 +91,8 @@ class AbstractDaterangeObject(AbstractObject, ABC):
             meta_dict['sparkline'] = self.get_sparkline()
         if 'last_full_date' in options:
             meta_dict['last_full_date'] = meta_dict['last_seen']
+        if 'link' in options:
+            meta_dict['link'] = self.get_link(flask_context=flask_context)
         return meta_dict
 
     def set_first_seen(self, first_seen):
@@ -219,8 +222,11 @@ class AbstractDaterangeObjects(ABC):
     def get_ids(self):
         return r_object.smembers(f'{self.type}:all')
 
+    def get_iterator_ids(self):
+        return sscan_iterator(r_object, f'{self.type}:all')
+
     def get_iterator(self):
-        for obj_id in self.get_ids():
+        for obj_id in self.get_iterator_ids():
             yield self.obj_class(obj_id)
 
     def get_nb(self):

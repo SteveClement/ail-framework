@@ -24,6 +24,7 @@ config_loader = ConfigLoader()
 # r_cache = config_loader.get_redis_conn("Redis_Cache")
 r_serv_metadata = config_loader.get_db_conn("Kvrocks_Objects")
 IMAGE_FOLDER = config_loader.get_files_directory('images')
+baseurl = config_loader.get_config_str("Notifications", "ail_domain")
 config_loader = None
 
 
@@ -108,6 +109,14 @@ class Image(AbstractDaterangeObject):
             description = description.replace("`", ' ')
         return description
 
+    def get_search_document(self):
+        global_id = self.get_global_id()
+        content = self.get_description()
+        if content:
+            return {'uuid': self.get_uuid5(global_id), 'id': global_id, 'content': content}
+        else:
+            return None
+
     def get_misp_object(self):
         obj_attrs = []
         obj = MISPObject('file')
@@ -119,8 +128,8 @@ class Image(AbstractDaterangeObject):
                 obj_attr.add_tag(tag)
         return obj
 
-    def get_meta(self, options=set()):
-        meta = self._get_meta(options=options)
+    def get_meta(self, options=set(), flask_context=False):
+        meta = self._get_meta(options=options, flask_context=flask_context)
         meta['id'] = self.id
         meta['img'] = self.id
         meta['tags'] = self.get_tags(r_list=True)

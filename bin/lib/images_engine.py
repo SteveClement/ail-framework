@@ -17,6 +17,7 @@ from lib.ail_core import get_default_image_description_model
 from lib.objects import Domains
 from lib.objects import Images
 from lib.objects import Screenshots
+from lib import search_engine
 
 config_loader = ConfigLoader()
 OLLAMA_URL = config_loader.get_config_str('Images', 'ollama_url')
@@ -37,7 +38,7 @@ def get_image_obj(obj_gid):
 
 def create_ollama_domain_data(model, descriptions):
     return json.dumps({'model': model,
-                       'prompt': f'From this list of images descritions, Can you please describe this domain and check if it\'s related to child exploitaton?\n\n{descriptions}',
+                       'prompt': f'From this list of images descriptions of one domain, describe this domain.\n\n{descriptions}',
                        'stream': False
                        })
 
@@ -46,6 +47,25 @@ def create_ollama_image_data(model, images):
                        'prompt': 'what is in this picture?',
                        'stream': False,
                        'images': images
+                       })
+
+def create_ollama_description_csam_classification(model, description):
+    return json.dumps({'model': model,
+                       'prompt': f'Does this description involve CE or CSAM? Answer "Yes" or "No".\nDescription: {description}',
+                       'stream': False
+                       })
+
+def create_ollama_image_csam_classification(model, images):
+    return json.dumps({'model': model,
+                       'prompt': 'Does this image involve CE or CSAM? Answer "Yes" or "No".',
+                       'stream': False,
+                       'images': images
+                       })
+
+def create_ollama_domain_csam_classification(model, descriptions):
+    return json.dumps({'model': model,
+                       'prompt': f'Is this website domain associated with child exploitation? Respond with only "Yes" or "No"\n\n{descriptions}',
+                       'stream': False
                        })
 
 # screenshot + image
@@ -71,11 +91,18 @@ def api_get_image_description(obj_gid):
         return {"status": "error", "reason": f"ollama requests error: {e}"}, 400
     if res.status_code != 200:
         # TODO LOG
-        return {"status": "error", "reason": f" llama requests error: {res.status_code}, {res.text}"}, 400
+        return {"status": "error", "reason": f"ollama requests error: {res.status_code}, {res.text}"}, 400
     else:
         r = res.json()
         if r:
             image.add_description_model(model, r['response'])
+            # index
+            if search_engine.is_meilisearch_enabled():
+                if image.type == 'image':
+                    search_engine.index_image_description(image)
+                else:
+                    search_engine.index_screenshot_description(image)
+
             return r['response'], 200
     return None, 200
 
@@ -109,11 +136,15 @@ def get_domain_description(domain_id, reprocess=True):
         return {"status": "error", "reason": f"ollama requests error: {e}"}, 400
     if res.status_code != 200:
         # TODO LOG
-        return {"status": "error", "reason": f" llama requests error: {res.status_code}, {res.text}"}, 400
+        return {"status": "error", "reason": f"ollama requests error: {res.status_code}, {res.text}"}, 400
     else:
         r = res.json()
         if r:
             domain.add_description_model(model, r['response'])
+            # index
+            if search_engine.is_meilisearch_enabled():
+                search_engine.index_domain_description(domain_id)
+
             print(r['response'])
             return r['response'], 200
     return None, 200
@@ -127,6 +158,114 @@ def _create_domains_up_description():
         progress = int(done * 100 / nb_domains)
         print(f'{done}/{nb_domains}        {progress}%')
 
+def _create_image_description():
+    # total = Images.Images().get_nb()
+    done = 0
+    for image in Images.get_all_images_objects():
+        r = api_get_image_description(image.get_global_id())
+        if r[1] == 200:
+            print(r[0])
+        done += 1
+        print(done)
+        # progress = int(done * 100 / total)
+        # print(f'{done}/{total}        {progress}%')
+
+
+def update_domain_description(domain, model):
+    domain.delete_description(model)
+    search_engine.remove_document('desc-dom', domain.get_global_id())
+    get_domain_description(domain.get_id(), reprocess=False)
+
+def update_domains_descriptions():
+    nb_domains = Domains.get_nb_domains_up_by_type('onion') + Domains.get_nb_domains_up_by_type('web')
+    model = get_default_image_description_model()
+    done = 0
+    for domain in Domains.get_domain_up_iterator():
+        update_domain_description(domain, model)
+        done += 1
+        progress = int(done * 100 / nb_domains)
+        print(f'{done}/{nb_domains}        {progress}%')
+    search_engine.delete_index('desc-dom')
+
+
+def check_is_image_csam(obj_gid, image_description=False):
+    model = get_default_image_description_model()
+
+    image = get_image_obj(obj_gid)
+    if not image:
+        return {"status": "error", "reason": "Unknown image"}, 404
+
+    headers = {"Connection": "close", 'Content-Type': 'application/json', 'Accept': 'application/json'}
+    is_csam = None
+
+    # Check if image description is CSAM related
+    if image_description:
+        description = api_get_image_description(obj_gid)
+        if description[1] == 200:
+            description = description[0]
+        data = create_ollama_description_csam_classification(model, description)
+
+    # Check If image content is CSAM
+    else:
+        b64 = image.get_base64()
+        if not b64:
+            return {"status": "error", "reason": "No Content"}, 404
+        data = create_ollama_image_csam_classification(model, [b64])
+
+    if data:
+        try:
+            res = requests.post(f'{OLLAMA_URL}/api/generate', data=data, headers=headers)
+        except Exception as e:
+            return {"status": "error", "reason": f"ollama requests error: {e}"}, 400
+        if res.status_code != 200:
+            # TODO LOG
+            return {"status": "error", "reason": f"ollama requests error: {res.status_code}, {res.text}"}, 400
+        else:
+            r = res.json()['response'].lower()
+            print(r)
+            if r:
+                if 'yes' in r:
+                    is_csam = True
+                elif 'no' in r:
+                    is_csam = False
+
+    # TODO LOG NONE result
+    if is_csam:
+        image.add_tag('dark-web:topic="pornography-child-exploitation"')
+        print(obj_gid, is_csam)
+
+    return is_csam, 200
+
+def check_images_csam(image_description=False):
+    for image in Images.get_all_images_objects():
+        check_is_image_csam(image.get_global_id(), image_description=image_description)
+
+
+def check_if_domain_csam(domain_id):
+    model = get_default_image_description_model()
+    domain = Domains.Domain(domain_id)
+    description = get_domain_description(domain_id)
+
+    headers = {"Connection": "close", 'Content-Type': 'application/json', 'Accept': 'application/json'}
+    try:
+        res = requests.post(f'{OLLAMA_URL}/api/generate', data=create_ollama_domain_csam_classification(model, description), headers=headers)
+    except Exception as e:  # TODO LOG
+        return {"status": "error", "reason": f"ollama requests error: {e}"}, 400
+    if res.status_code != 200:
+        # TODO LOG
+        return {"status": "error", "reason": f"ollama requests error: {res.status_code}, {res.text}"}, 400
+    else:
+        r = res.json()
+        if r:
+            if r['response'] == 'yes':
+                print('yes')
+                domain.add_tag('dark-web:topic="pornography-child-exploitation"')
+
 
 if __name__ == '__main__':
-    _create_domains_up_description()
+    # api_get_image_description('')
+    # update_domain_description(Domains.Domain(''), get_default_image_description_model())
+    check_is_image_csam('', image_description=False)
+    # update_domains_descriptions()
+    # check_images_csam()
+    # _create_image_description()

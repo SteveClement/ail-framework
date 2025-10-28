@@ -540,8 +540,13 @@ def get_chat_object_messages_meta(c_messages):
                 if meta['forwarded_from'] not in temp_chats:
                     chat = get_obj_chat_from_global_id(meta['forwarded_from'])
                     temp_chats[meta['forwarded_from']] = chat.get_meta({'icon'})
-                else:
-                    meta['forwarded_from'] = temp_chats[meta['forwarded_from']]
+                meta['forwarded_from'] = temp_chats[meta['forwarded_from']]
+            if 'reply_to' in meta:
+                if meta.get('reply_to').get('forwarded_from'):
+                    if meta['reply_to']['forwarded_from'] not in temp_chats:
+                        chat = get_obj_chat_from_global_id(meta['reply_to']['forwarded_from'])
+                        temp_chats[meta['reply_to']['forwarded_from']] = chat.get_meta({'icon'})
+                    meta['reply_to']['forwarded_from'] = temp_chats[meta['reply_to']['forwarded_from']]
             if meta['barcodes']:
                 barcodes = []
                 for q in meta['barcodes']:
@@ -779,6 +784,33 @@ def get_chats_monitoring_requests_metas():
         requests.append(cr.get_meta())
     return requests
 
+def get_new_chats_monitoring_requests():
+    return r_obj.smembers(f'chats:requests:new')
+
+def get_nb_new_chats_monitoring_requests():
+    return r_obj.scard(f'chats:requests:new')
+
+def api_done_chat_monitoring_request(c_uuid): # TODO LOG
+    cm = ChatsMonitoringRequest(c_uuid)
+    if not cm.exists():
+        return {"status": "error", "reason": "Unknown chat monitoring"}, 404
+    else:
+        return cm.done(), 200
+
+def api_reject_chat_monitoring_request(c_uuid): # TODO LOG
+    cm = ChatsMonitoringRequest(c_uuid)
+    if not cm.exists():
+        return {"status": "error", "reason": "Unknown chat monitoring"}, 404
+    else:
+        return cm.reject(), 200
+
+def api_delete_chat_monitoring_request(c_uuid): # TODO LOG
+    cm = ChatsMonitoringRequest(c_uuid)
+    if not cm.exists():
+        return {"status": "error", "reason": "Unknown chat monitoring"}, 404
+    else:
+        return cm.delete(), 200
+
 class ChatsMonitoringRequest:
     def __init__(self, r_uuid):
         self.uuid = r_uuid
@@ -790,7 +822,7 @@ class ChatsMonitoringRequest:
         r_obj.hset(f'chats:request:{self.uuid}', name, value)
 
     def exists(self):
-        r_obj.exists(f'chats:request:{self.uuid}')
+        return r_obj.exists(f'chats:request:{self.uuid}')
 
     def get_meta(self):
         return {'uuid': self.uuid,
@@ -800,9 +832,11 @@ class ChatsMonitoringRequest:
                 'invite': self._get_field('invite'),
                 'username': self._get_field('username'),
                 'description': self._get_field('description'),
-        }
+                'status': self._get_field('status'),
+                }
 
     def create(self, creator, chat_type, invite, username, description):
+        r_obj.sadd(f'chats:requests:new', self.uuid)
         self._set_field('chat_type', chat_type)
         self._set_field('creator', creator)
         self._set_field('date', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
@@ -813,6 +847,20 @@ class ChatsMonitoringRequest:
         if description:
             self._set_field('description', description)
         r_obj.sadd(f'chats:requests', self.uuid)
+
+    def done(self):
+        self._set_field('status', 'done')
+        r_obj.srem(f'chats:requests:new', self.uuid)
+
+    def reject(self):
+        self._set_field('status', 'rejected')
+        r_obj.srem(f'chats:requests:new', self.uuid)
+
+    def delete(self):
+        r_obj.delete(f'chats:request:{self.uuid}')
+        r_obj.srem(f'chats:requests', self.uuid)
+        r_obj.srem(f'chats:requests:new', self.uuid)
+
 
 def create_chat_monitoring_requests(creator, chat_type, invite, username, description):
     r_uuid = generate_uuid()
@@ -1048,6 +1096,10 @@ def api_get_message(message_id, translation_target=None):
     if 'forwarded_from' in meta:
         chat = get_obj_chat_from_global_id(meta['forwarded_from'])
         meta['forwarded_from'] = chat.get_meta({'icon'})
+    if 'reply_to' in meta:
+        if meta['reply_to'].get('forwarded_from'):
+            chat = get_obj_chat_from_global_id(meta['reply_to']['forwarded_from'])
+            meta['reply_to']['forwarded_from'] = chat.get_meta({'icon'})
     barcodes = []
     for q in meta['barcodes']:
         obj = Barcode(q)

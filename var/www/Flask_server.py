@@ -117,10 +117,15 @@ for handler in flask_logger.handlers:
 
 # =========  TLS  =========#
 
-ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-ssl_context.load_cert_chain(certfile=os.path.join(Flask_dir, 'server.crt'), keyfile=os.path.join(Flask_dir, 'server.key'))
-ssl_context.suppress_ragged_eofs = True
-# print(ssl_context.get_ciphers())
+ssl_context = None
+self_signed_certfile = os.path.join(Flask_dir, 'server.crt')
+self_signed_keyfile = os.path.join(Flask_dir, 'server.key')
+
+if os.path.exists(self_signed_certfile) and os.path.exists(self_signed_keyfile):
+    ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    ssl_context.load_cert_chain(certfile=self_signed_certfile, keyfile=self_signed_keyfile)
+    ssl_context.suppress_ragged_eofs = True
+    # print(ssl_context.get_ciphers())
 # =========       =========#
 
 Flask_config.app = Flask(__name__, static_url_path=baseUrl+'/static/')
@@ -266,6 +271,8 @@ def _handle_client_error(e):
     if request.path.startswith('/api/'):
         return Response(json.dumps({"status": "error", "reason": "Server Error"}) + '\n', mimetype='application/json'), 500
     else:
+        if current_user:
+            flask_logger.warning(f'User: {current_user.get_user_id()}')
         return e
 
 @login_required

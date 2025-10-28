@@ -52,17 +52,6 @@ git checkout 5.0
 make
 popd
 
-# Faup
-test ! -d faup/ && git clone https://github.com/stricaud/faup.git
-pushd faup/
-test ! -d build && mkdir build
-cd build
-cmake .. && make
-sudo make install
-echo '/usr/local/lib' | sudo tee -a /etc/ld.so.conf.d/faup.conf
-sudo ldconfig
-popd
-
 # tlsh
 test ! -d tlsh && git clone https://github.com/trendmicro/tlsh.git
 pushd tlsh/
@@ -81,6 +70,21 @@ autoreconf -fiW all
 make
 sudo make install
 popd
+
+# Yara
+YARA_VERSION="4.3.0"
+mkdir yara_temp
+wget https://github.com/VirusTotal/yara/archive/v${YARA_VERSION}.zip -O yara_temp/yara.zip
+unzip yara_temp/yara.zip -d yara_temp/
+pushd yara_temp/yara-${YARA_VERSION}
+./bootstrap.sh
+./configure
+make
+sudo make install
+make check
+popd
+rm -rf yara_temp
+
 
 # ARDB #
 #test ! -d ardb/ && git clone https://github.com/ail-project/ardb.git

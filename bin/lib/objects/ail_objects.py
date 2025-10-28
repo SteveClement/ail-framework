@@ -100,9 +100,9 @@ def sanitize_objs_types(objs, default=False):
             l_types.append(obj)
     if not l_types:
         if default:
-            l_types = get_default_correlation_objects()
+            l_types = list(get_default_correlation_objects())
         else:
-            l_types = get_all_objects()
+            l_types = list(get_all_objects())
     return l_types
 
 
@@ -306,7 +306,7 @@ def get_object_card_meta(obj_type, subtype, id, related_btc=False):
     if subtype or obj_type == 'cookie-name' or obj_type == 'cve' or obj_type == 'etag' or obj_type == 'title' or obj_type == 'favicon' or obj_type == 'hhhash':
         meta['sparkline'] = obj.get_sparkline()
         if obj_type == 'cve':
-            meta['cve_search'] = obj.get_cve_search()
+            meta['vulnerability_lookup'] = obj.get_vulnerability_lookup()
         # if obj_type == 'title':
         #     meta['cve_search'] = obj.get_cve_search()
     if subtype == 'bitcoin' and related_btc:

@@ -32,17 +32,30 @@ def get_zmq_filter():
         zmq_filter = f.read()
     zmq_filter = json.loads(zmq_filter)
     for d in zmq_filter:
-        feeder_name = d.get('feeder')
+        feeder_name = d.get('source')
         if not feeder_name:
             continue
         if feeder_name not in filters:
             filters[feeder_name] = []
-        str_start = d['start']
-        str_end = d['end']
+        str_start = d.get('start')
+        str_end = d.get('end')
+        file_start = d.get('file_start')
+        file_end = d.get('file_end')
+        content = d.get('content')
         description = d.get('description')
-        if not str_start and not str_end:
+        if not str_start and not str_end and not file_start and not file_end and not content:
             continue
-        filters[feeder_name].append({'start': str_start, 'end': str_end, 'description': description})
+        feeder = {'description': description}
+        if str_start and str_end:
+            feeder['start'] = str_start
+            feeder['end'] = str_end
+        if file_start:
+            feeder['file_start'] = file_start
+        if file_end:
+            feeder['file_end'] = file_end
+        if content:
+            feeder['content'] = content
+        filters[feeder_name].append(feeder)
     print('loaded zmq filters: ', filters)
     return filters
 
@@ -117,19 +130,37 @@ class ZMQModuleImporter(AbstractModule):
                     # TODO remove empty line ???
                     to_filter = False
                     for f in self.filters[feeder_name]:
-                        if content.startswith(f['start']) and content.endswith(f['end']):
-                            same_pattern = True
-                            for line in content.splitlines():
-                                if line:
-                                    if not (line.startswith(f['start']) and line.endswith(f['end'])):
-                                        same_pattern = False
-                                        break
-                            if same_pattern:
+                        if 'start' and 'end' in f:
+                            if content.startswith(f['start']) and content.endswith(f['end']):
+                                same_pattern = True
+                                for line in content.splitlines():
+                                    if line:
+                                        if not (line.startswith(f['start']) and line.endswith(f['end'])):
+                                            same_pattern = False
+                                            break
+                                if same_pattern:
+                                    to_filter = True
+                                    filter_description = f['description']
+                                    break
+                        elif 'content' in f:
+                            if content == f['content']:
                                 to_filter = True
+                                filter_description = f['description']
                                 break
+                        elif 'file_start' in f:
+                            if content.startswith(f['file_start']):
+                                to_filter = True
+                                filter_description = f['description']
+                                break
+                        elif 'file_end' in f:
+                            if content.endswith(f['file_end']):
+                                to_filter = True
+                                filter_description = f['description']
+                                break
+
                     # Filter content
                     if to_filter:
-                        print(f'Filtered -------- {feeder_name}: {obj_id}')
+                        print(f'Filtered -------- {feeder_name}: {obj_id} -------- {filter_description}')
                         continue
 
             obj = Item(obj_id)

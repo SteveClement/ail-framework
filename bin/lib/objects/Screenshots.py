@@ -24,6 +24,7 @@ config_loader = ConfigLoader()
 # r_cache = config_loader.get_redis_conn("Redis_Cache")
 r_serv_metadata = config_loader.get_db_conn("Kvrocks_Objects")
 SCREENSHOT_FOLDER = config_loader.get_files_directory('screenshot')
+baseurl = config_loader.get_config_str("Notifications", "ail_domain")
 config_loader = None
 
 
@@ -112,6 +113,14 @@ class Screenshot(AbstractObject):
             model = get_default_image_description_model()
         return self._get_field(f'desc:{model}')
 
+    def get_search_document(self):
+        global_id = self.get_global_id()
+        content = self.get_description()
+        if content:
+            return {'uuid': self.get_uuid5(global_id), 'id': global_id, 'content': content}
+        else:
+            return None
+
     def get_misp_object(self):
         obj_attrs = []
         obj = MISPObject('file')
@@ -123,7 +132,7 @@ class Screenshot(AbstractObject):
                 obj_attr.add_tag(tag)
         return obj
 
-    def get_meta(self, options=set()):
+    def get_meta(self, options=set(), flask_context=False):
         meta = self.get_default_meta()
         meta['img'] = get_screenshot_rel_path(self.id)  ######### # TODO: Rename ME ??????
         meta['tags'] = self.get_tags(r_list=True)
@@ -131,6 +140,8 @@ class Screenshot(AbstractObject):
             meta['description'] = self.get_description()
         if 'tags_safe' in options:
             meta['tags_safe'] = self.is_tags_safe(meta['tags'])
+        if 'link' in options:
+            meta['link'] = self.get_link(flask_context=flask_context)
         return meta
 
 def get_screenshot_dir():

@@ -6,6 +6,7 @@ import logging
 import logging.config
 import sys
 import time
+import uuid
 
 import meilisearch
 
@@ -16,8 +17,10 @@ sys.path.append(os.environ['AIL_BIN'])
 from lib import ail_logger
 from lib.ConfigLoader import ConfigLoader
 from lib.objects import Domains
+from lib.objects import Images
 from lib.objects import Items
 from lib.objects import Messages
+from lib.objects import Screenshots
 from lib import chats_viewer
 
 logging.config.dictConfig(ail_logger.get_config(name='ail'))
@@ -28,6 +31,11 @@ IS_MEILISEARCH_ENABLED = config_loader.get_config_boolean('Indexer', 'meilisearc
 M_URL = config_loader.get_config_str('Indexer', 'meilisearch_url')
 M_KEY = config_loader.get_config_str('Indexer', 'meilisearch_key')
 config_loader = None
+
+
+def get_obj_uuid5(obj_gid):
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, obj_gid))
+
 
 def is_meilisearch_enabled():
     return IS_MEILISEARCH_ENABLED
@@ -66,7 +74,7 @@ class MeiliSearch:
         return self.client.get_indexes()
 
     def _create_indexes(self):
-        for index in ['cdiscord', 'ctelegram', 'cmatrix', 'tor', 'web']:  # TODO dynamic load of chat uuid ?
+        for index in ['cdiscord', 'ctelegram', 'cmatrix', 'desc-dom', 'desc-img', 'desc-screen', 'tor', 'web']:  # TODO dynamic load of chat uuid ?
             self.client.create_index(index, {'primaryKey': 'uuid'})
 
     def add(self, index, document):
@@ -96,8 +104,11 @@ def index_all():
     # Engine._delete('tor')
     # Engine._delete('web')
     Engine._create_indexes()
-    index_crawled()
-    index_chats_messages()
+    # index_crawled()
+    # index_chats_messages()
+    index_images_descriptions()
+    index_screenshots_descriptions()
+    # index_domains_descriptions()
 
 # TODO index titles
 def _index_crawled_domain(dom_id):
@@ -132,6 +143,51 @@ def index_message(message):
 def index_chats_messages():
     for message in chats_viewer.get_messages_iterator():
         index_message(message)
+
+
+def index_image_description(image):
+    index = f'desc-img'
+    document = image.get_search_document()
+    if document:
+        Engine.add(index, document)
+
+def index_images_descriptions():
+    for image in Images.get_all_images_objects():
+        index_image_description(image)
+
+
+def index_screenshot_description(screenshot):
+    index = f'desc-screen'
+    document = screenshot.get_search_document()
+    if document:
+        Engine.add(index, document)
+
+def index_screenshots_descriptions():
+    for screenshot in Screenshots.get_screenshots_obj_iterator():
+        index_screenshot_description(screenshot)
+
+
+def index_domain_description(domain_id):
+    index = f'desc-dom'
+    domain = Domains.Domain(domain_id)
+    document = domain.get_search_description_document()
+    if document:
+        Engine.add(index, document)
+
+def index_domains_descriptions():
+    for dom_id in Domains.get_domains_up_by_type('onion'):
+        index_domain_description(dom_id)
+    for dom_id in Domains.get_domains_up_by_type('web'):
+        index_domain_description(dom_id)
+
+
+def remove_document(index_name, obj_gid):
+    Engine.remove(index_name, get_obj_uuid5(obj_gid))
+
+
+def delete_index(index_name):
+    Engine._delete(index_name)
+    Engine.client.create_index(index_name, {'primaryKey': 'uuid'})
 
 def log(user_id, index, to_search):
     logger.warning(f'{user_id} search: {index} - {to_search}')
@@ -256,6 +312,47 @@ def api_search_chats(data):
             meta['protocol'] = chats_viewer.get_chat_protocol_meta(meta['protocol'])
             if meta.get('reply_to'):
                 print(meta['reply_to'])
+            meta['result'] = res['_formatted']['content']
+            objs.append(meta)
+    return (objs, pagination), 200
+
+
+def api_search_images(data):
+    index = data.get("index")
+    to_search = data.get("search")
+    page = sanityze_page(data.get("page"))
+    nb_per_page = 20
+    user_id = data.get("user_id")
+    log(user_id, index, to_search)
+
+    if not index or index not in ['desc-dom', 'desc-img', 'desc-screen']:
+        return {"status": "error", "reason": "Invalid search index"}, 400
+    if not to_search:
+        return {"status": "error", "reason": "Invalid search query"}, 400
+
+    if index == 'all':
+        indexes = ['desc-dom', 'desc-img', 'desc-screen']
+    else:
+        indexes = [index]
+
+    result = Engine.search(indexes, to_search, page=page, nb=nb_per_page)
+    objs = []
+    pagination = {}
+    # if isinstance(result['results'], dict):
+    if result.get("hits"):
+        pagination = extract_pagination_from_result(result, nb_per_page, page)
+        for res in result['hits']:
+            obj_type, subtype, obj_id = res['id'].split(':', 2)
+            if obj_type == 'image':
+                obj = Images.Image(obj_id)
+            elif obj_type == 'screenshot':
+                obj = Screenshots.Screenshot(obj_id)
+            elif obj_type == 'domain':
+                obj = Domains.Domain(obj_id)
+            else:
+                continue  # TODO ERROR
+            # domain
+            meta = obj.get_meta(options={'link', 'tags_safe'})
             meta['result'] = res['_formatted']['content']
             objs.append(meta)
     return (objs, pagination), 200

@@ -3,7 +3,6 @@
 
 import os
 import re
-import logging
 import logging.config
 import sys
 import html2text
@@ -40,6 +39,7 @@ dict_iso_languages = {
     'hye': 'Armenian',
     'aze': 'Azerbaijani',
     'eus': 'Basque',
+    'bel': 'Belarusian',
     'ben': 'Bengali',
     'bos': 'Bosnian',
     'bul': 'Bulgarian',
@@ -157,6 +157,7 @@ dict_iso_1_to_3 = {
     'am': 'amh',
     'ar': 'ara',
     'az': 'aze',
+    'be': 'bel',
     'bg': 'bul',
     'bg-Latn': 'bul',  # gcld3 output
     'bn': 'ben',
@@ -194,6 +195,7 @@ dict_iso_1_to_3 = {
     'ig': 'ibo',
     'is': 'isl',
     'it': 'ita',
+    'iw': 'heb',       # gcld3 use the old language code
     'ja': 'jpn',
     'ja-Latn': 'jpn',  # gcld3 output
     'jv': 'jav',
@@ -648,11 +650,24 @@ class LanguageTranslator:
         self.lt = LibreTranslateAPI(get_translator_instance())
         self.ld = LanguagesDetector(nb_langs=1)
 
+    def ping(self):
+        try:
+            r = self.lt.translate('test', 'en', 'en')
+            if r == 'test':
+                return True
+            else:
+                return False
+        except Exception as e:
+            return False
+
     def languages(self):
         languages = []
         try:
             for dict_lang in self.lt.languages():
-                languages.append({'iso': convert_iso1_code(dict_lang['code']), 'language': dict_lang['name']})
+                try:
+                    languages.append({'iso': convert_iso1_code(dict_lang['code']), 'language': dict_lang['name']})
+                except Exception as e:
+                    logger.error(f'Language code: {e} - {dict_lang}')
         except Exception as e:
             logger.error(f'Failed to Load Libretranslate languages: {e}')
         return languages
@@ -686,8 +701,12 @@ class LanguageTranslator:
 
     def translate(self, content, source=None, target="eng"):
         # print(source, target)
-        if target not in get_translation_languages():
-            return None
+        l_languages = get_translation_languages()
+        if source:
+            if source not in l_languages:
+                return None, None
+        if target not in l_languages:
+            return None, None
         translation = None
         if content:
             if not source:
@@ -695,6 +714,8 @@ class LanguageTranslator:
             # print(source, content)
             if source:
                 if source != target:
+                    if source not in l_languages:
+                        return None, None
                     try:
                         source_iso1 = convert_iso3_code(source)
                         target_iso1 = convert_iso3_code(target)
@@ -737,8 +758,13 @@ def get_translation_languages():
             LIST_LANGUAGES = {}
     return LIST_LANGUAGES
 
+def ping_libretranslate():
+    return LanguageTranslator().ping()
+
+
 if __name__ == '__main__':
-    t_content = ''
-    ddetector = LanguagesDetector(nb_langs=1)
-    langg = ddetector.detect(t_content)
-    print(langg)
+    # t_content = ''
+    # ddetector = LanguagesDetector(nb_langs=1)
+    # langg = ddetector.detect(t_content)
+    # print(langg)
+    print(ping_libretranslate())

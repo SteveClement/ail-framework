@@ -19,8 +19,6 @@ import datetime
 import dns.resolver
 import dns.exception
 
-# from pyfaup.faup import Faup
-
 sys.path.append(os.environ['AIL_BIN'])
 ##################################
 # Import Project packages        #
@@ -43,8 +41,6 @@ class Mail(AbstractModule):
         self.r_cache = config_loader.get_redis_conn("Redis_Cache")
 
         self.dns_server = config_loader.get_config_str('Mail', 'dns')
-
-        # self.faup = Faup()
 
         # Numbers of Mails needed to Tags
         self.mail_threshold = 10
@@ -136,24 +132,17 @@ class Mail(AbstractModule):
                     print(e)
         return valid_mxdomain
 
-    def extract(self, obj, content, tag, check_mx_record=False):
+    def extract(self, obj, content, tag):
         extracted = []
-        mxdomains = {}
-        mails = self.regex_finditer(self.email_regex, obj.get_global_id(), content)
-        for mail in mails:
-            start, end, value = mail
-            mxdomain = value.rsplit('@', 1)[1].lower()
-            if mxdomain not in mxdomains:
-                mxdomains[mxdomain] = []
-            mxdomains[mxdomain].append(mail)
-        if check_mx_record:
-            for mx in self.check_mx_record(mxdomains.keys()):
-                for row in mxdomains[mx]:
-                    extracted.append([row[0], row[1], row[2], f'tag:{tag}'])
-        else:
-            for mx in mxdomains:
-                for row in mxdomains[mx]:
-                    extracted.append([row[0], row[1], row[2], f'tag:{tag}'])
+        correls = obj.get_correlation('mail').get('mail', [])
+        if len(correls) > 150:
+            return []
+        for m_id in correls:
+            m = Mails.Mail(m_id[1:])
+            mail = m.get_content()
+            r_mail = re.compile(mail, flags=re.IGNORECASE)
+            for row in self.regex_finditer(r_mail, m.get_global_id(), content):
+                extracted.append([row[0], row[1], row[2], f'tag:{tag}'])
         return extracted
 
     # # TODO: sanitize mails
